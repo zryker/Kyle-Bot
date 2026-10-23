@@ -1,7 +1,7 @@
 {
-  "name": "KyleBot",
+  "name": "kyle-bot",
   "version": "1.0.0",
-  "description": "Bot hecho por zRyker",
+  "description": "**Bot creado por **zRyker**",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
