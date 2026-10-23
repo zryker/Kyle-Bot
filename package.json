@@ -1,7 +1,7 @@
 {
   "name": "kyle-bot",
   "version": "1.0.0",
-  "description": "**Bot creador por: zRyker**",
+  "description": "**Bot creado por: zRyker**",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -13,3 +13,4 @@
   "engines": {
     "node": ">=18.0.0"
   }
+}
