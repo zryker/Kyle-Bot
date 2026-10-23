@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
+const { Client, GatewayIntentBits, PermissionFlagsBits } = require('discord.js');
 const express = require('express');
 
 // --- Servidor Web para Render ---
@@ -17,21 +17,86 @@ const client = new Client({
     ]
 });
 
-// Guardado en memoria
-const configCanales = { bienvenida: null, despedida: null, niveles: null, logs: null };
+// Configuración de canales y niveles en memoria
+const configCanales = {
+    bienvenida: null,
+    despedida: null,
+    niveles: null,
+    logs: null
+};
+
 const usuariosXP = {};
+
+// Helper para enviar registros al canal de Logs
+async function enviarLog(guild, texto) {
+    if (!configCanales.logs) return;
+    const logChannel = guild.channels.cache.get(configCanales.logs);
+    if (logChannel) {
+        await logChannel.send(texto).catch(() => {});
+    }
+}
+
+// Helper para parsear tiempo (1d, 1h, 3m)
+function parsearTiempo(tiempoStr) {
+    if (!tiempoStr) return null;
+    const regex = /(\d+)\s*([dhm])/gi;
+    let duracionMs = 0;
+    let match;
+
+    while ((match = regex.exec(tiempoStr)) !== null) {
+        const valor = parseInt(match[1]);
+        const unidad = match[2].toLowerCase();
+
+        if (unidad === 'd') duracionMs += valor * 24 * 60 * 60 * 1000;
+        else if (unidad === 'h') duracionMs += valor * 60 * 60 * 1000;
+        else if (unidad === 'm') duracionMs += valor * 60 * 1000;
+    }
+
+    return duracionMs > 0 ? duracionMs : null;
+}
 
 client.once('ready', () => {
     console.log(`¡Kyle Bot se ha conectado exitosamente como ${client.user.tag}!`);
     client.user.setActivity('Servidor | !help', { type: 0 });
 });
 
-client.on('messageCreate', async (message) => {
-    if (message.author.bot) return;
+// ==========================================
+// 1. BIENVENIDAS Y DESPEDIDAS (Texto Plano)
+// ==========================================
 
-    // --- SISTEMA DE XP Y NIVELES ---
+client.on('guildMemberAdd', async (member) => {
+    if (configCanales.bienvenida) {
+        const channel = member.guild.channels.cache.get(configCanales.bienvenida);
+        if (channel) {
+            await channel.send(`🎉 ¡Bienvenido/a a **${member.guild.name}**, ${member}! Pásala excelente en el servidor. *(Miembro #${member.guild.memberCount})*`).catch(() => {});
+        }
+    }
+    enviarLog(member.guild, `📥 **Nuevo Miembro:** ${member.user.tag} (${member.id}) se ha unido al servidor.`);
+});
+
+client.on('guildMemberRemove', async (member) => {
+    if (configCanales.despedida) {
+        const channel = member.guild.channels.cache.get(configCanales.despedida);
+        if (channel) {
+            await channel.send(`😢 **${member.user.tag}** ha salido del servidor. ¡Esperamos volver a verte!`).catch(() => {});
+        }
+    }
+    enviarLog(member.guild, `📤 **Miembro Saliente:** ${member.user.tag} (${member.id}) ha salido del servidor.`);
+});
+
+// ==========================================
+// 2. SISTEMA DE NIVELES Y COMANDOS (!)
+// ==========================================
+
+client.on('messageCreate', async (message) => {
+    if (message.author.bot || !message.guild) return;
+
+    // --- SISTEMA DE XP POR MENSAGE ---
     const userId = message.author.id;
-    if (!usuariosXP[userId]) usuariosXP[userId] = { xp: 0, nivel: 1 };
+    if (!usuariosXP[userId]) {
+        usuariosXP[userId] = { xp: 0, nivel: 1 };
+    }
+
     usuariosXP[userId].xp += Math.floor(Math.random() * 11) + 5;
     const xpNecesaria = usuariosXP[userId].nivel * 100;
 
@@ -45,16 +110,7 @@ client.on('messageCreate', async (message) => {
             if (canalConfig) canalEnvio = canalConfig;
         }
 
-        try {
-            const embedNivel = new EmbedBuilder()
-                .setTitle('🎉 ¡Nivel Alcanzado!')
-                .setDescription(`¡Felicidades ${message.author}! Has subido al **Nivel ${usuariosXP[userId].nivel}** 🚀`)
-                .setColor('#f1c40f')
-                .setTimestamp();
-            await canalEnvio.send({ content: `${message.author}`, embeds: [embedNivel] });
-        } catch (e) {
-            console.error('Error al enviar anuncio de nivel:', e);
-        }
+        await canalEnvio.send(`🎉 ¡Felicidades ${message.author}! Has subido al **Nivel ${usuariosXP[userId].nivel}** 🚀`).catch(() => {});
     }
 
     // --- PROCESAR COMANDOS CON ! ---
@@ -67,79 +123,172 @@ client.on('messageCreate', async (message) => {
     try {
         // --- COMANDO: !help ---
         if (command === 'help') {
-            const embedHelp = new EmbedBuilder()
-                .setTitle('🤖 Menú de Ayuda - Kyle Bot')
-                .setDescription(`Prefijo del bot: **\`${PREFIX}\`**`)
-                .setColor('#5865f2')
-                .addFields(
-                    { name: '📊 Niveles', value: `\`!rank\` - Muestra tu nivel y XP actual.\n\`!nivelchannel #canal\` - Configura el canal de niveles.` },
-                    { name: '⚙️ Configuración (Admin)', value: `\`!bienvenida #canal\`\n\`!despedida #canal\`\n\`!logs #canal\`` },
-                    { name: '🛡️ Moderación', value: `\`!ban <@usuario> [razón]\`\n\`!unban <ID_Usuario>\`\n\`!mute <@usuario> <tiempo> [razón]\`\n\`!unmute <@usuario>\`\n\`!kick <@usuario> [razón]\`\n\`!clear <1-100>\`` },
-                    { name: '📩 Embeds', value: `\`!embed Título | Descripción | #Color\`` }
-                )
-                .setTimestamp();
+            const ayudaTexto = 
+`🤖 **MENÚ DE AYUDA - KYLE BOT**
+Prefijo del bot: \`!\`
 
-            return await message.channel.send({ embeds: [embedHelp] });
+📊 **NIVELES**
+• \`!rank\` - Consulta tu nivel y XP acumulada.
+• \`!nivelchannel #canal\` - Establece el canal donde se anuncian los niveles.
+
+⚙️ **CONFIGURACIÓN (Administradores)**
+• \`!bienvenida #canal\` - Define el canal de bienvenidas.
+• \`!despedida #canal\` - Define el canal de despedidas.
+• \`!logs #canal\` - Define el canal de registros de moderación.
+
+🛡️ **MODERACIÓN**
+• \`!mute <@usuario> <tiempo> [razón]\` - Silencia (Ej: \`!mute @user 1d 1h 3m SPAM\`).
+• \`!unmute <@usuario>\` - Retira el silencio a un usuario.
+• \`!ban <@usuario> [razón]\` - Banea a un usuario.
+• \`!unban <ID_Usuario>\` - Desbanea a un usuario usando su ID.
+• \`!kick <@usuario> [razón]\` - Expulsa a un usuario.
+• \`!clear <1-100>\` - Borra mensajes masivamente.
+
+📩 **ANUNCIOS**
+• \`!embed Título | Descripción\` - Envía un anuncio formateado.`;
+
+            return await message.channel.send(ayudaTexto);
         }
 
         // --- COMANDO: !rank ---
         if (command === 'rank' || command === 'nivel') {
             const datos = usuariosXP[userId] || { xp: 0, nivel: 1 };
-            const embedRank = new EmbedBuilder()
-                .setTitle(`📊 Perfil de Nivel - ${message.author.username}`)
-                .setColor('#2ecc71')
-                .addFields(
-                    { name: 'Nivel Actual', value: `**${datos.nivel}**`, inline: true },
-                    { name: 'Experiencia (XP)', value: `**${datos.xp} / ${datos.nivel * 100}**`, inline: true }
-                )
-                .setTimestamp();
-
-            return await message.channel.send({ embeds: [embedRank] });
+            const xpRequerida = datos.nivel * 100;
+            return await message.channel.send(`📊 **Perfil de Nivel de ${message.author.username}:**\n• Nivel: **${datos.nivel}**\n• Experiencia: **${datos.xp} / ${xpRequerida} XP**`);
         }
 
-        // --- COMANDO: !clear ---
-        if (command === 'clear') {
-            const cantidad = parseInt(args[0]);
-            if (isNaN(cantidad) || cantidad < 1 || cantidad > 100) {
-                return message.reply('⚠️ Indica una cantidad entre 1 y 100. Ejemplo: `!clear 10`');
+        // --- COMANDO: !embed ---
+        if (command === 'embed') {
+            const contenido = args.join(' ');
+            const partes = contenido.split('|');
+
+            if (!partes[0] || !partes[1]) {
+                return message.reply('❌ Uso correcto: `!embed Título | Descripción`');
             }
-            await message.channel.bulkDelete(cantidad, true);
-            const reply = await message.channel.send(`🧹 Se han eliminado ${cantidad} mensajes.`);
-            return setTimeout(() => reply.delete().catch(() => {}), 3000);
+
+            const titulo = partes[0].trim();
+            const descripcion = partes[1].trim();
+
+            const anuncioTexto = `📢 **${titulo}**\n\n${descripcion}\n\n_*Enviado por ${message.author.tag}*_`;
+            return await message.channel.send(anuncioTexto);
         }
 
-        // --- CONFIGURACIÓN DE CANALES ---
+        // --- COMANDOS DE CONFIGURACIÓN ---
         if (command === 'nivelchannel') {
+            if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Necesitas permisos de Administrador.');
             const canal = message.mentions.channels.first();
             if (!canal) return message.reply('⚠️ Menciona el canal: `!nivelchannel #niveles`');
             configCanales.niveles = canal.id;
-            return message.reply(`✅ Subidas de nivel configuradas en ${canal}`);
+            return message.reply(`✅ Las subidas de nivel ahora se anunciarán en ${canal}`);
         }
 
         if (command === 'bienvenida') {
+            if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Necesitas permisos de Administrador.');
             const canal = message.mentions.channels.first();
             if (!canal) return message.reply('⚠️ Menciona el canal: `!bienvenida #canal`');
             configCanales.bienvenida = canal.id;
-            return message.reply(`✅ Bienvenidas configuradas en ${canal}`);
+            return message.reply(`✅ Canal de bienvenidas configurado en ${canal}`);
         }
 
         if (command === 'despedida') {
+            if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Necesitas permisos de Administrador.');
             const canal = message.mentions.channels.first();
             if (!canal) return message.reply('⚠️ Menciona el canal: `!despedida #canal`');
             configCanales.despedida = canal.id;
-            return message.reply(`✅ Despedidas configuradas en ${canal}`);
+            return message.reply(`✅ Canal de despedidas configurado en ${canal}`);
         }
 
         if (command === 'logs') {
+            if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Necesitas permisos de Administrador.');
             const canal = message.mentions.channels.first();
             if (!canal) return message.reply('⚠️ Menciona el canal: `!logs #canal`');
             configCanales.logs = canal.id;
-            return message.reply(`✅ Logs configurados en ${canal}`);
+            return message.reply(`✅ Canal de logs configurado en ${canal}`);
+        }
+
+        // --- COMANDOS DE MODERACIÓN ---
+        if (command === 'clear') {
+            if (!message.member.permissions.has(PermissionFlagsBits.ManageMessages)) return message.reply('❌ Permisos insuficientes.');
+            const cantidad = parseInt(args[0]);
+            if (isNaN(cantidad) || cantidad < 1 || cantidad > 100) return message.reply('⚠️ Indica una cantidad entre 1 y 100.');
+
+            await message.channel.bulkDelete(cantidad, true);
+            const msg = await message.channel.send(`🧹 Se han eliminado **${cantidad}** mensajes.`);
+            setTimeout(() => msg.delete().catch(() => {}), 3000);
+            return;
+        }
+
+        if (command === 'mute') {
+            if (!message.member.permissions.has(PermissionFlagsBits.ModerateMembers)) return message.reply('❌ Permisos insuficientes.');
+            const userToMute = message.mentions.members.first();
+            if (!userToMute) return message.reply('⚠️ Uso: `!mute <@usuario> <tiempo> [razón]`');
+            if (!userToMute.moderatable) return message.reply('❌ No puedo silenciar a este usuario.');
+
+            const argsSinUser = args.slice(1).join(' ');
+            const tiempoMs = parsearTiempo(argsSinUser);
+            if (!tiempoMs) return message.reply('⚠️ Tiempo inválido. Usa d, h o m (Ej: `1d`, `2h`, `1d1h3m`).');
+
+            const razon = argsSinUser.replace(/(\d+)\s*([dhm])/gi, '').trim() || 'Sin razón especificada';
+            await userToMute.timeout(tiempoMs, razon);
+            
+            message.channel.send(`🔇 **${userToMute.user.tag}** ha sido silenciado correctamente.`);
+            enviarLog(message.guild, `🔇 **Mute:** ${userToMute.user.tag} por ${argsSinUser.match(/(\d+)\s*([dhm])/gi).join(' ')}. Mod: ${message.author.tag}. Razón: ${razon}`);
+            return;
+        }
+
+        if (command === 'unmute') {
+            if (!message.member.permissions.has(PermissionFlagsBits.ModerateMembers)) return message.reply('❌ Permisos insuficientes.');
+            const userToUnmute = message.mentions.members.first();
+            if (!userToUnmute) return message.reply('⚠️ Menciona al usuario a desilenciar.');
+
+            await userToUnmute.timeout(null);
+            message.channel.send(`🔊 A **${userToUnmute.user.tag}** se le ha retirado el silencio.`);
+            enviarLog(message.guild, `🔊 **Unmute:** ${userToUnmute.user.tag}. Mod: ${message.author.tag}`);
+            return;
+        }
+
+        if (command === 'ban') {
+            if (!message.member.permissions.has(PermissionFlagsBits.BanMembers)) return message.reply('❌ Permisos insuficientes.');
+            const userToBan = message.mentions.members.first();
+            if (!userToBan || !userToBan.bannable) return message.reply('❌ No se puede banear a este usuario.');
+            const razon = args.slice(1).join(' ') || 'Sin razón especificada';
+
+            await userToBan.ban({ reason: razon });
+            message.channel.send(`🚫 **${userToBan.user.tag}** ha sido baneado del servidor.`);
+            enviarLog(message.guild, `🚫 **Ban:** ${userToBan.user.tag}. Mod: ${message.author.tag}. Razón: ${razon}`);
+            return;
+        }
+
+        if (command === 'unban') {
+            if (!message.member.permissions.has(PermissionFlagsBits.BanMembers)) return message.reply('❌ Permisos insuficientes.');
+            const userIdToUnban = args[0];
+            if (!userIdToUnban) return message.reply('⚠️ Especifica la ID del usuario. Ej: `!unban 1234567890`');
+
+            try {
+                await message.guild.members.unban(userIdToUnban);
+                message.channel.send(`✅ ID **${userIdToUnban}** desbaneada con éxito.`);
+                enviarLog(message.guild, `🔓 **Unban:** ID ${userIdToUnban}. Mod: ${message.author.tag}`);
+            } catch (err) {
+                message.reply('❌ No se encontró ningún baneo activo para esa ID.');
+            }
+            return;
+        }
+
+        if (command === 'kick') {
+            if (!message.member.permissions.has(PermissionFlagsBits.KickMembers)) return message.reply('❌ Permisos insuficientes.');
+            const userToKick = message.mentions.members.first();
+            if (!userToKick || !userToKick.kickable) return message.reply('❌ No se puede expulsar a este usuario.');
+            const razon = args.slice(1).join(' ') || 'Sin razón especificada';
+
+            await userToKick.kick(razon);
+            message.channel.send(`👞 **${userToKick.user.tag}** expulsado del servidor.`);
+            enviarLog(message.guild, `👞 **Kick:** ${userToKick.user.tag}. Mod: ${message.author.tag}. Razón: ${razon}`);
+            return;
         }
 
     } catch (error) {
-        console.error(`Error ejecutando comando ${command}:`, error);
-        message.reply(`❌ Ocurrió un error al ejecutar el comando: \`${error.message}\``);
+        console.error(`Error en comando ${command}:`, error);
+        message.reply(`❌ Ocurrió un error al procesar la orden: \`${error.message}\``);
     }
 });
 
