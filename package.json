@@ -1,1 +1,13 @@
-
+{
+  "name": "KyleBot",
+  "version": "1.0.0",
+  "description": "Bot hecho por zRyker",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.14.0",
+    "express": "^4.19.2"
+  }
+}
