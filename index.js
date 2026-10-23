@@ -54,7 +54,7 @@ function parsearTiempo(tiempoStr) {
 
 client.once('ready', () => {
     console.log(`¡Kyle Bot se ha conectado como ${client.user.tag}!`);
-    client.user.setActivity('Servidor | \'help', { type: 0 });
+    client.user.setActivity('Servidor | !help', { type: 0 });
 });
 
 // ==========================================
@@ -109,18 +109,19 @@ client.on('guildMemberRemove', async (member) => {
 });
 
 // ==========================================
-// 2. ATENCIÓN A COMANDOS CON PREFIJO (')
+// 2. ATENCIÓN A COMANDOS CON PREFIJO (!)
 // ==========================================
 
 client.on('messageCreate', async (message) => {
-    const PREFIX = "'";
+    // Prefijo configurado a !
+    const PREFIX = "!";
 
     if (message.author.bot || !message.content.startsWith(PREFIX)) return;
 
     const args = message.content.slice(PREFIX.length).trim().split(/ +/);
     const command = args.shift().toLowerCase();
 
-    // --- COMANDO: 'help ---
+    // --- COMANDO: !help ---
     if (command === 'help') {
         const embedHelp = new EmbedBuilder()
             .setTitle('🤖 Menú de Ayuda - Kyle Bot')
@@ -129,15 +130,15 @@ client.on('messageCreate', async (message) => {
             .addFields(
                 { 
                     name: '📩 Mensajes Embed', 
-                    value: `\`'embed Título | Descripción | #Color\`\nCrea un anuncio en formato Embed.` 
+                    value: `\`!embed Título | Descripción | #Color\`\nCrea un anuncio en formato Embed.` 
                 },
                 { 
                     name: '⚙️ Configuración (Admin)', 
-                    value: `\`'bienvenida #canal\`\n\`'despedida #canal\`\n\`'logs #canal\`` 
+                    value: `\`!bienvenida #canal\`\n\`!despedida #canal\`\n\`!logs #canal\`` 
                 },
                 { 
                     name: '🛡️ Moderación', 
-                    value: `\`'mute <@usuario> <tiempo> [razón]\` - Aísla a un usuario (Ej: 1d 1h 3m).\n\`'clear <1-100>\` - Elimina mensajes masivamente.\n\`'kick <@usuario> [razón]\` - Expulsa a un miembro.\n\`'ban <@usuario> [razón]\` - Banea a un miembro.` 
+                    value: `\`!mute <@usuario> <tiempo> [razón]\` - Aísla a un usuario (Ej: 1d 1h 3m).\n\`!clear <1-100>\` - Elimina mensajes masivamente.\n\`!kick <@usuario> [razón]\` - Expulsa a un miembro.\n\`!ban <@usuario> [razón]\` - Banea a un miembro.` 
                 }
             )
             .setFooter({ text: 'Kyle Bot - Sistema de Gestión', iconURL: client.user.displayAvatarUrl() })
@@ -146,13 +147,13 @@ client.on('messageCreate', async (message) => {
         return message.channel.send({ embeds: [embedHelp] });
     }
 
-    // --- COMANDO: 'embed ---
+    // --- COMANDO: !embed ---
     if (command === 'embed') {
         const contenido = args.join(' ');
         const partes = contenido.split('|');
 
         if (!partes[0] || !partes[1]) {
-            return message.reply('❌ Uso correcto: `\'embed Título | Descripción | #Color`');
+            return message.reply('❌ Uso correcto: `!embed Título | Descripción | #Color`');
         }
 
         const titulo = partes[0].trim();
@@ -173,10 +174,7 @@ client.on('messageCreate', async (message) => {
         return message.channel.send({ embeds: [customEmbed] });
     }
 
-    // --- COMANDO: 'mute ---
-    // Ejemplos de uso:
-    // 'mute @usuario 30m SPAM
-    // 'mute @usuario 1d 1h 3m Comportamiento inadecuado
+    // --- COMANDO: !mute ---
     if (command === 'mute') {
         if (!message.member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
             return message.reply('❌ No tienes permiso para aislar/silenciar miembros.');
@@ -184,34 +182,30 @@ client.on('messageCreate', async (message) => {
 
         const userToMute = message.mentions.members.first();
         if (!userToMute) {
-            return message.reply('⚠️ Uso correcto: `\'mute <@usuario> <tiempo> [razón]`\nEjemplo: `\'mute @usuario 1d1h3m Mal comportamiento`');
+            return message.reply('⚠️ Uso correcto: `!mute <@usuario> <tiempo> [razón]`\nEjemplo: `!mute @usuario 1d1h3m Mal comportamiento`');
         }
 
         if (!userToMute.moderatable) {
-            return message.reply('❌ No puedo silenciar a este usuario (tiene un rol superior o igual al mío).');
+            return message.reply('❌ No puedo silenciar a este usuario.');
         }
 
-        // Extraer los argumentos omitiendo la mención
         const argsSinUser = args.slice(1).join(' ');
         const tiempoMs = parsearTiempo(argsSinUser);
 
         if (!tiempoMs) {
-            return message.reply('⚠️ Especifica un tiempo válido usando **d** (días), **h** (horas) o **m** (minutos).\nEjemplos: `10m`, `2h`, `1d`, `1d1h3m`');
+            return message.reply('⚠️ Especifica un tiempo válido usando **d**, **h** o **m**.\nEjemplos: `10m`, `2h`, `1d`, `1d1h3m`');
         }
 
-        // Límite máximo de aislamiento nativo en Discord es de 28 días
         const maxTiempo = 28 * 24 * 60 * 60 * 1000;
         if (tiempoMs > maxTiempo) {
-            return message.reply('⚠️ El tiempo máximo de aislamiento permitido por Discord es de 28 días.');
+            return message.reply('⚠️ El tiempo máximo permitido por Discord es de 28 días.');
         }
 
-        // Extraer la razón removiendo el patrón del tiempo
         const razon = argsSinUser.replace(/(\d+)\s*([dhm])/gi, '').trim() || 'Sin razón especificada';
 
         await userToMute.timeout(tiempoMs, razon);
         message.channel.send(`🔇 **${userToMute.user.tag}** ha sido silenciado correctamente.`);
 
-        // Registro de Log
         const log = new EmbedBuilder()
             .setTitle('🔇 Miembro Silenciado (Mute)')
             .setColor('#f1c40f')
@@ -225,40 +219,40 @@ client.on('messageCreate', async (message) => {
         enviarLog(message.guild, log);
     }
 
-    // --- COMANDO: 'bienvenida #canal ---
+    // --- COMANDO: !bienvenida #canal ---
     if (command === 'bienvenida') {
         if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) {
             return message.reply('❌ Necesitas permisos de Administrador.');
         }
         const canal = message.mentions.channels.first();
-        if (!canal) return message.reply('⚠️ Menciona el canal: `\'bienvenida #canal`');
+        if (!canal) return message.reply('⚠️ Menciona el canal: `!bienvenida #canal`');
         configCanales.bienvenida = canal.id;
         return message.reply(`✅ Canal de bienvenidas configurado en ${canal}`);
     }
 
-    // --- COMANDO: 'despedida #canal ---
+    // --- COMANDO: !despedida #canal ---
     if (command === 'despedida') {
         if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) {
             return message.reply('❌ Necesitas permisos de Administrador.');
         }
         const canal = message.mentions.channels.first();
-        if (!canal) return message.reply('⚠️ Menciona el canal: `\'despedida #canal`');
+        if (!canal) return message.reply('⚠️ Menciona el canal: `!despedida #canal`');
         configCanales.despedida = canal.id;
         return message.reply(`✅ Canal de despedidas configurado en ${canal}`);
     }
 
-    // --- COMANDO: 'logs #canal ---
+    // --- COMANDO: !logs #canal ---
     if (command === 'logs') {
         if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) {
             return message.reply('❌ Necesitas permisos de Administrador.');
         }
         const canal = message.mentions.channels.first();
-        if (!canal) return message.reply('⚠️ Menciona el canal: `\'logs #canal`');
+        if (!canal) return message.reply('⚠️ Menciona el canal: `!logs #canal`');
         configCanales.logs = canal.id;
         return message.reply(`✅ Canal de logs configurado en ${canal}`);
     }
 
-    // --- COMANDO: 'clear ---
+    // --- COMANDO: !clear ---
     if (command === 'clear') {
         if (!message.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
             return message.reply('❌ No tienes permiso para borrar mensajes.');
@@ -283,7 +277,7 @@ client.on('messageCreate', async (message) => {
         enviarLog(message.guild, log);
     }
 
-    // --- COMANDO: 'kick ---
+    // --- COMANDO: !kick ---
     if (command === 'kick') {
         if (!message.member.permissions.has(PermissionFlagsBits.KickMembers)) return;
         const userToKick = message.mentions.members.first();
@@ -304,7 +298,7 @@ client.on('messageCreate', async (message) => {
         enviarLog(message.guild, log);
     }
 
-    // --- COMANDO: 'ban ---
+    // --- COMANDO: !ban ---
     if (command === 'ban') {
         if (!message.member.permissions.has(PermissionFlagsBits.BanMembers)) return;
         const userToBan = message.mentions.members.first();
@@ -327,4 +321,4 @@ client.on('messageCreate', async (message) => {
 });
 
 client.login(process.env.TOKEN);
-                                 
+        
