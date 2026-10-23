@@ -1,5 +1,7 @@
 const { Client, GatewayIntentBits, PermissionFlagsBits } = require('discord.js');
 const express = require('express');
+const fs = require('fs');
+const path = require('path');
 
 // --- Servidor Web para Render ---
 const app = express();
@@ -17,15 +19,44 @@ const client = new Client({
     ]
 });
 
-// Configuración de canales y niveles en memoria
-const configCanales = {
-    bienvenida: null,
-    despedida: null,
-    niveles: null,
-    logs: null
-};
+// Guardado persistente en archivo config.json
+const configPath = path.join(__dirname, 'config.json');
+let configCanales = { bienvenida: null, despedida: null, niveles: null, logs: null };
+
+if (fs.existsSync(configPath)) {
+    try {
+        configCanales = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    } catch (e) {
+        console.error("Error leyendo config.json:", e);
+    }
+}
+
+function guardarConfig() {
+    try {
+        fs.writeFileSync(configPath, JSON.stringify(configCanales, null, 2));
+    } catch (e) {
+        console.error("Error guardando config.json:", e);
+    }
+}
 
 const usuariosXP = {};
+
+// Helper para obtener un canal por Mención, ID o Nombre
+function obtenerCanal(message, args) {
+    // 1. Si el usuario mencionó el canal directamente
+    if (message.mentions.channels.first()) {
+        return message.mentions.channels.first();
+    }
+    
+    if (!args[0]) return null;
+    
+    // Limpia caracteres de mención si los hay (<#ID>)
+    const canalId = args[0].replace(/[<#>]/g, '');
+    
+    // 2. Buscar por ID o por Nombre del canal en el servidor
+    return message.guild.channels.cache.get(canalId) || 
+           message.guild.channels.cache.find(c => c.name.toLowerCase() === args.join(' ').toLowerCase().replace('#', ''));
+}
 
 // Helper para enviar registros al canal de Logs
 async function enviarLog(guild, texto) {
@@ -91,7 +122,7 @@ client.on('guildMemberRemove', async (member) => {
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
 
-    // --- SISTEMA DE XP POR MENSAGE ---
+    // --- SISTEMA DE XP POR MENSAJE ---
     const userId = message.author.id;
     if (!usuariosXP[userId]) {
         usuariosXP[userId] = { xp: 0, nivel: 1 };
@@ -174,36 +205,44 @@ Prefijo del bot: \`!\`
         }
 
         // --- COMANDOS DE CONFIGURACIÓN ---
-        if (command === 'nivelchannel') {
-            if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Necesitas permisos de Administrador.');
-            const canal = message.mentions.channels.first();
-            if (!canal) return message.reply('⚠️ Menciona el canal: `!nivelchannel #niveles`');
-            configCanales.niveles = canal.id;
-            return message.reply(`✅ Las subidas de nivel ahora se anunciarán en ${canal}`);
-        }
-
         if (command === 'bienvenida') {
             if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Necesitas permisos de Administrador.');
-            const canal = message.mentions.channels.first();
-            if (!canal) return message.reply('⚠️ Menciona el canal: `!bienvenida #canal`');
+            const canal = obtenerCanal(message, args);
+            if (!canal) return message.reply('⚠️ Menciona el canal deseado. Ejemplo: `!bienvenida #canal`');
+            
             configCanales.bienvenida = canal.id;
-            return message.reply(`✅ Canal de bienvenidas configurado en ${canal}`);
+            guardarConfig();
+            return message.reply(`✅ Canal de bienvenidas configurado correctamente en ${canal}`);
         }
 
         if (command === 'despedida') {
             if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Necesitas permisos de Administrador.');
-            const canal = message.mentions.channels.first();
-            if (!canal) return message.reply('⚠️ Menciona el canal: `!despedida #canal`');
+            const canal = obtenerCanal(message, args);
+            if (!canal) return message.reply('⚠️ Menciona el canal deseado. Ejemplo: `!despedida #canal`');
+            
             configCanales.despedida = canal.id;
-            return message.reply(`✅ Canal de despedidas configurado en ${canal}`);
+            guardarConfig();
+            return message.reply(`✅ Canal de despedidas configurado correctamente en ${canal}`);
+        }
+
+        if (command === 'nivelchannel') {
+            if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Necesitas permisos de Administrador.');
+            const canal = obtenerCanal(message, args);
+            if (!canal) return message.reply('⚠️ Menciona el canal deseado. Ejemplo: `!nivelchannel #canal`');
+            
+            configCanales.niveles = canal.id;
+            guardarConfig();
+            return message.reply(`✅ Las subidas de nivel ahora se anunciarán en ${canal}`);
         }
 
         if (command === 'logs') {
             if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Necesitas permisos de Administrador.');
-            const canal = message.mentions.channels.first();
-            if (!canal) return message.reply('⚠️ Menciona el canal: `!logs #canal`');
+            const canal = obtenerCanal(message, args);
+            if (!canal) return message.reply('⚠️ Menciona el canal deseado. Ejemplo: `!logs #canal`');
+            
             configCanales.logs = canal.id;
-            return message.reply(`✅ Canal de logs configurado en ${canal}`);
+            guardarConfig();
+            return message.reply(`✅ Canal de logs configurado correctamente en ${canal}`);
         }
 
         // --- COMANDOS DE MODERACIÓN ---
@@ -281,7 +320,7 @@ Prefijo del bot: \`!\`
             const razon = args.slice(1).join(' ') || 'Sin razón especificada';
 
             await userToKick.kick(razon);
-            message.channel.send(`👞 **${userToKick.user.tag}** expulsado del servidor.`);
+            message.channel.send(`i **${userToKick.user.tag}** expulsado del servidor.`);
             enviarLog(message.guild, `👞 **Kick:** ${userToKick.user.tag}. Mod: ${message.author.tag}. Razón: ${razon}`);
             return;
         }
@@ -293,4 +332,4 @@ Prefijo del bot: \`!\`
 });
 
 client.login(process.env.TOKEN);
-        
+                
