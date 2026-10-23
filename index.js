@@ -1,4 +1,12 @@
-const { Client, GatewayIntentBits, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
+const { 
+    Client, 
+    GatewayIntentBits, 
+    EmbedBuilder, 
+    PermissionFlagsBits, 
+    REST, 
+    Routes, 
+    SlashCommandBuilder 
+} = require('discord.js');
 const express = require('express');
 
 // --- Servidor Web para Render ---
@@ -19,12 +27,12 @@ const client = new Client({
 
 // Guardado en memoria de los canales configurados
 const configCanales = {
-    bienvenida: null, // Guardará la ID del canal
+    bienvenida: null,
     despedida: null,
     logs: null
 };
 
-// Helper para enviar registros al canal de Logs si está configurado
+// Helper para enviar registros al canal de Logs
 async function enviarLog(guild, embed) {
     if (!configCanales.logs) return;
     const logChannel = guild.channels.cache.get(configCanales.logs);
@@ -33,16 +41,83 @@ async function enviarLog(guild, embed) {
     }
 }
 
-client.once('ready', () => {
+// ==========================================
+// REGISTRO DE COMANDOS SLASH (/) EN DISCORD
+// ==========================================
+const commands = [
+    new SlashCommandBuilder()
+        .setName('embed')
+        .setDescription('Crea un mensaje en formato Embed')
+        .addStringOption(option => 
+            option.setName('titulo')
+                .setDescription('Título del mensaje')
+                .setRequired(true))
+        .addStringOption(option => 
+            option.setName('descripcion')
+                .setDescription('Descripción del mensaje')
+                .setRequired(true))
+        .addStringOption(option => 
+            option.setName('color')
+                .setDescription('Color en formato Hex (Ej: #ff0000 o #5865f2)')
+                .setRequired(false)),
+
+    new SlashCommandBuilder()
+        .setName('clear')
+        .setDescription('Elimina mensajes masivamente')
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
+        .addIntegerOption(option => 
+            option.setName('cantidad')
+                .setDescription('Número de mensajes a borrar (1 - 100)')
+                .setRequired(true)),
+
+    new SlashCommandBuilder()
+        .setName('kick')
+        .setDescription('Expulsa a un miembro del servidor')
+        .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers)
+        .addUserOption(option => 
+            option.setName('usuario')
+                .setDescription('Usuario a expulsar')
+                .setRequired(true))
+        .addStringOption(option => 
+            option.setName('razon')
+                .setDescription('Razón de la expulsión')
+                .setRequired(false)),
+
+    new SlashCommandBuilder()
+        .setName('ban')
+        .setDescription('Banea a un miembro del servidor')
+        .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers)
+        .addUserOption(option => 
+            option.setName('usuario')
+                .setDescription('Usuario a banear')
+                .setRequired(true))
+        .addStringOption(option => 
+            option.setName('razon')
+                .setDescription('Razón del baneo')
+                .setRequired(false))
+];
+
+// Evento: Bot listo y registro de comandos Slash
+client.once('ready', async () => {
     console.log(`¡Kyle Bot se ha conectado como ${client.user.tag}!`);
-    client.user.setActivity('Servidor | !help', { type: 0 });
+    client.user.setActivity('Servidor | /embed', { type: 0 });
+
+    const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
+    try {
+        console.log('Cargando comandos Slash (/)...');
+        await rest.put(
+            Routes.applicationCommands(client.user.id),
+            { body: commands }
+        );
+        console.log('¡Comandos Slash (/) registrados exitosamente!');
+    } catch (error) {
+        console.error('Error registrando los comandos Slash:', error);
+    }
 });
 
 // ==========================================
-// 1. SISTEMA DE BIENVENIDAS Y DESPEDIDAS
+// SISTEMA DE BIENVENIDAS Y DESPEDIDAS
 // ==========================================
-
-// Evento: Entrada de usuario
 client.on('guildMemberAdd', async (member) => {
     if (configCanales.bienvenida) {
         const channel = member.guild.channels.cache.get(configCanales.bienvenida);
@@ -59,7 +134,6 @@ client.on('guildMemberAdd', async (member) => {
         }
     }
 
-    // Log de entrada
     const embedLog = new EmbedBuilder()
         .setTitle('📥 Nuevo Miembro')
         .setDescription(`${member.user.tag} (${member.id}) se ha unido al servidor.`)
@@ -68,7 +142,6 @@ client.on('guildMemberAdd', async (member) => {
     enviarLog(member.guild, embedLog);
 });
 
-// Evento: Salida de usuario
 client.on('guildMemberRemove', async (member) => {
     if (configCanales.despedida) {
         const channel = member.guild.channels.cache.get(configCanales.despedida);
@@ -84,7 +157,6 @@ client.on('guildMemberRemove', async (member) => {
         }
     }
 
-    // Log de salida
     const embedLog = new EmbedBuilder()
         .setTitle('📤 Miembro Saliente')
         .setDescription(`${member.user.tag} (${member.id}) ha salido del servidor.`)
@@ -94,122 +166,143 @@ client.on('guildMemberRemove', async (member) => {
 });
 
 // ==========================================
-// 2. COMANDOS DEL BOT
+// ATENCIÓN A COMANDOS SLASH (INTERACCIONES)
 // ==========================================
+client.on('interactionCreate', async (interaction) => {
+    if (!interaction.isChatInputCommand()) return;
 
-client.on('messageCreate', async (message) => {
-    if (message.author.bot || !message.content.startsWith('!')) return;
+    const { commandName } = interaction;
 
-    const args = message.content.slice(1).trim().split(/ +/);
-    const command = args.shift().toLowerCase();
+    // --- COMANDO: /embed ---
+    if (commandName === 'embed') {
+        const titulo = interaction.options.getString('titulo');
+        const descripcion = interaction.options.getString('descripcion');
+        let color = interaction.options.getString('color') || '#5865f2';
 
-    // --- COMANDO: !embed ---
-    // Uso: !embed Título | Descripción | #Color
-    if (command === 'embed') {
-        const contenido = args.join(' ');
-        const partes = contenido.split('|');
-
-        if (!partes[0] || !partes[1]) {
-            return message.reply('❌ Uso correcto: `!embed Título | Descripción | #Color`');
-        }
-
-        const titulo = partes[0].trim();
-        const descripcion = partes[1].trim();
-        let color = partes[2] ? partes[2].trim() : '#5865f2';
-
-        // Validar que el color sea hex válido
         if (!/^#([0-9A-F]{3}){1,2}$/i.test(color)) {
-            color = '#5865f2'; // Si escriben un color mal, usa azul por defecto
+            color = '#5865f2';
         }
 
         const customEmbed = new EmbedBuilder()
             .setTitle(titulo)
             .setDescription(descripcion)
             .setColor(color)
-            .setFooter({ text: `Enviado por: ${message.author.tag}`, iconURL: message.author.displayAvatarUrl() })
+            .setFooter({ text: `Enviado por: ${interaction.user.tag}`, iconURL: interaction.user.displayAvatarUrl() })
             .setTimestamp();
 
-        // Borra el mensaje original del usuario para que solo quede el embed
-        await message.delete().catch(() => {});
-        return message.channel.send({ embeds: [customEmbed] });
+        // Responder directamente con el Embed en el canal
+        await interaction.reply({ embeds: [customEmbed] });
     }
 
-    // --- COMANDO: !bienvenida #canal ---
-    if (command === 'bienvenida') {
-        if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) {
-            return message.reply('❌ Necesitas permisos de Administrador para usar este comando.');
+    // --- COMANDO: /clear ---
+    if (commandName === 'clear') {
+        const cantidad = interaction.options.getInteger('cantidad');
+
+        if (cantidad < 1 || cantidad > 100) {
+            return interaction.reply({ content: '⚠️ Debes indicar una cantidad entre 1 y 100.', ephemeral: true });
         }
 
-        const canalMencionado = message.mentions.channels.first();
-        if (!canalMencionado) {
-            return message.reply('⚠️ Menciona el canal donde deseas las bienvenidas. Ejemplo: `!bienvenida #bienvenidas`');
-        }
+        await interaction.channel.bulkDelete(cantidad, true);
+        await interaction.reply({ content: `🧹 Se han eliminado ${cantidad} mensajes.`, ephemeral: true });
 
-        configCanales.bienvenida = canalMencionado.id;
-        return message.reply(`✅ Canal de bienvenidas configurado exitosamente en ${canalMencionado}`);
+        const log = new EmbedBuilder()
+            .setTitle('🧹 Mensajes Eliminados')
+            .setColor('#fee75c')
+            .addFields(
+                { name: 'Canal', value: `${interaction.channel}`, inline: true },
+                { name: 'Cantidad', value: `${cantidad}`, inline: true },
+                { name: 'Moderador', value: `${interaction.user.tag}`, inline: true }
+            )
+            .setTimestamp();
+        enviarLog(interaction.guild, log);
     }
 
-    // --- COMANDO: !despedida #canal ---
-    if (command === 'despedida') {
-        if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) {
-            return message.reply('❌ Necesitas permisos de Administrador para usar este comando.');
+    // --- COMANDO: /kick ---
+    if (commandName === 'kick') {
+        const userToKick = interaction.options.getMember('usuario');
+        const razon = interaction.options.getString('razon') || 'Sin razón especificada';
+
+        if (!userToKick) {
+            return interaction.reply({ content: '❌ Usuario no encontrado en este servidor.', ephemeral: true });
+        }
+        if (!userToKick.kickable) {
+            return interaction.reply({ content: '❌ No puedo expulsar a este usuario (rol más alto o permisos insuficientes).', ephemeral: true });
         }
 
-        const canalMencionado = message.mentions.channels.first();
-        if (!canalMencionado) {
-            return message.reply('⚠️ Menciona el canal donde deseas las despedidas. Ejemplo: `!despedida #despedidas`');
-        }
-
-        configCanales.despedida = canalMencionado.id;
-        return message.reply(`✅ Canal de despedidas configurado exitosamente en ${canalMencionado}`);
-    }
-
-    // --- COMANDO: !logs #canal ---
-    if (command === 'logs') {
-        if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) {
-            return message.reply('❌ Necesitas permisos de Administrador para usar este comando.');
-        }
-
-        const canalMencionado = message.mentions.channels.first();
-        if (!canalMencionado) {
-            return message.reply('⚠️ Menciona el canal donde deseas los registros. Ejemplo: `!logs #logs`');
-        }
-
-        configCanales.logs = canalMencionado.id;
-        return message.reply(`✅ Canal de logs configurado exitosamente en ${canalMencionado}`);
-    }
-
-    // --- COMANDOS DE MODERACIÓN (clear, kick, ban) ---
-    if (command === 'clear') {
-        if (!message.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
-            return message.reply('❌ No tienes permiso para borrar mensajes.');
-        }
-        const cantidad = parseInt(args[0]);
-        if (isNaN(cantidad) || cantidad < 1 || cantidad > 100) {
-            return message.reply('⚠️ Indica una cantidad entre 1 y 100.');
-        }
-        await message.channel.bulkDelete(cantidad, true);
-        const reply = await message.channel.send(`🧹 Se han eliminado ${cantidad} mensajes.`);
-        setTimeout(() => reply.delete().catch(() => {}), 3000);
-    }
-
-    if (command === 'kick') {
-        if (!message.member.permissions.has(PermissionFlagsBits.KickMembers)) return;
-        const userToKick = message.mentions.members.first();
-        if (!userToKick || !userToKick.kickable) return message.reply('❌ No se puede expulsar al usuario.');
-        const razon = args.slice(1).join(' ') || 'Sin razón';
         await userToKick.kick(razon);
-        message.channel.send(`✅ **${userToKick.user.tag}** expulsado.`);
+        await interaction.reply({ content: `✅ **${userToKick.user.tag}** ha sido expulsado.` });
+
+        const log = new EmbedBuilder()
+            .setTitle('👞 Miembro Expulsado')
+            .setColor('#ed4245')
+            .addFields(
+                { name: 'Usuario', value: `${userToKick.user.tag}`, inline: true },
+                { name: 'Moderador', value: `${interaction.user.tag}`, inline: true },
+                { name: 'Razón', value: razon }
+            )
+            .setTimestamp();
+        enviarLog(interaction.guild, log);
     }
 
-    if (command === 'ban') {
-        if (!message.member.permissions.has(PermissionFlagsBits.BanMembers)) return;
-        const userToBan = message.mentions.members.first();
-        if (!userToBan || !userToBan.bannable) return message.reply('❌ No se puede banear al usuario.');
-        const razon = args.slice(1).join(' ') || 'Sin razón';
+    // --- COMANDO: /ban ---
+    if (commandName === 'ban') {
+        const userToBan = interaction.options.getMember('usuario');
+        const razon = interaction.options.getString('razon') || 'Sin razón especificada';
+
+        if (!userToBan) {
+            return interaction.reply({ content: '❌ Usuario no encontrado en este servidor.', ephemeral: true });
+        }
+        if (!userToBan.bannable) {
+            return interaction.reply({ content: '❌ No puedo banear a este usuario (rol más alto o permisos insuficientes).', ephemeral: true });
+        }
+
         await userToBan.ban({ reason: razon });
-        message.channel.send(`🚫 **${userToBan.user.tag}** baneado.`);
+        await interaction.reply({ content: `🚫 **${userToBan.user.tag}** ha sido baneado.` });
+
+        const log = new EmbedBuilder()
+            .setTitle('🚫 Miembro Baneado')
+            .setColor('#ed4245')
+            .addFields(
+                { name: 'Usuario', value: `${userToBan.user.tag}`, inline: true },
+                { name: 'Moderador', value: `${interaction.user.tag}`, inline: true },
+                { name: 'Razón', value: razon }
+            )
+            .setTimestamp();
+        enviarLog(interaction.guild, log);
+    }
+});
+
+// Comandos de prefijo (!) para configuración de canales
+client.on('messageCreate', async (message) => {
+    if (message.author.bot || !message.content.startsWith('!')) return;
+
+    const args = message.content.slice(1).trim().split(/ +/);
+    const command = args.shift().toLowerCase();
+
+    if (command === 'bienvenida') {
+        if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
+        const canal = message.mentions.channels.first();
+        if (!canal) return message.reply('⚠️ Menciona el canal: `!bienvenida #canal`');
+        configCanales.bienvenida = canal.id;
+        return message.reply(`✅ Bienvenidas configuradas en ${canal}`);
+    }
+
+    if (command === 'despedida') {
+        if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
+        const canal = message.mentions.channels.first();
+        if (!canal) return message.reply('⚠️ Menciona el canal: `!despedida #canal`');
+        configCanales.despedida = canal.id;
+        return message.reply(`✅ Despedidas configuradas en ${canal}`);
+    }
+
+    if (command === 'logs') {
+        if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
+        const canal = message.mentions.channels.first();
+        if (!canal) return message.reply('⚠️ Menciona el canal: `!logs #canal`');
+        configCanales.logs = canal.id;
+        return message.reply(`✅ Logs configurados en ${canal}`);
     }
 });
 
 client.login(process.env.TOKEN);
+                
